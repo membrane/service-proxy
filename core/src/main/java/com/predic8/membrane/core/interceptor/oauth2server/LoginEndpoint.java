@@ -13,11 +13,15 @@
 package com.predic8.membrane.core.interceptor.oauth2server;
 
 import com.bornium.http.Exchange;
+import com.bornium.http.Response;
 import com.bornium.security.oauth2openid.Constants;
+import com.bornium.security.oauth2openid.providers.GrantContext;
 import com.bornium.security.oauth2openid.providers.Session;
-import com.bornium.security.oauth2openid.server.ServerServices;
+import com.bornium.security.oauth2openid.server.AuthorizationServer;
 import com.bornium.security.oauth2openid.server.endpoints.Endpoint;
+import com.google.common.collect.ImmutableMap;
 import com.predic8.membrane.core.Router;
+import com.predic8.membrane.core.interceptor.authentication.session.LoginDialog;
 import com.predic8.membrane.core.interceptor.authentication.session.UserDataProvider;
 import com.predic8.membrane.core.interceptor.oauth2.ClaimRenamer;
 import com.predic8.membrane.core.interceptor.oauth2.ConsentPageFile;
@@ -32,14 +36,14 @@ import java.io.UnsupportedEncodingException;
 import java.util.HashSet;
 import java.util.Map;
 
-public class LoginEndpoint extends Endpoint {
+public class LoginEndpoint extends Endpoint{
 
     LoginDialog2 loginDialog;
     URIFactory uriFactory;
     private String loginPath;
     private final ConsentPageFile csf;
 
-    public LoginEndpoint(Router router, ServerServices serverServices, UserDataProvider userDataProvider, com.predic8.membrane.core.interceptor.session.SessionManager sessionManager, String loginDialogLocation, String loginPath, ConsentPageFile csf, String... paths) throws Exception {
+    public LoginEndpoint(Router router, AuthorizationServer serverServices, UserDataProvider userDataProvider, com.predic8.membrane.core.interceptor.session.SessionManager sessionManager, String loginDialogLocation, String loginPath, ConsentPageFile csf, String... paths) throws Exception {
         super(serverServices, paths);
         this.loginPath = loginPath;
         this.csf = csf;
@@ -76,11 +80,19 @@ public class LoginEndpoint extends Endpoint {
     private void initConsentWhenNeeded(Exchange exchange, com.predic8.membrane.core.exchange.Exchange exc) throws Exception {
         if(exc.getRequest().getUri().contains("consent")){
             Session s = this.serverServices.getProvidedServices().getSessionProvider().getSession(exchange);
+            GrantContext ctx = getGrantContext(exc);
             s.putValue(ConsentPageFile.PRODUCT_NAME, csf.getProductName());
             s.putValue(ConsentPageFile.LOGO_URL, csf.getLogoUrl());
-            s.putValue(ConsentPageFile.SCOPE_DESCRIPTIONS, getScopeDescriptions(s.getValue(ParamNames.SCOPE).split(" ")));
-            s.putValue(ConsentPageFile.CLAIM_DESCRIPTIONS, getClaimDescriptions(processClaimsParameterToClaimsString(s.getValue(ParamNames.CLAIMS))));
+            s.putValue(ConsentPageFile.SCOPE_DESCRIPTIONS, getScopeDescriptions(ctx.getValue(ParamNames.SCOPE).split(" ")));
+            s.putValue(ConsentPageFile.CLAIM_DESCRIPTIONS, getClaimDescriptions(processClaimsParameterToClaimsString(ctx.getValue(ParamNames.CLAIMS))));
         }
+    }
+
+    private GrantContext getGrantContext(com.predic8.membrane.core.exchange.Exchange exc) throws Exception {
+        Map<String, String> params = URLParamUtil.getParams(uriFactory, exc);
+        String grantContextId = URLParamUtil.parseQueryString(params.get("target").substring(params.get("target").indexOf("?") + 1)).get(Constants.GRANT_CONTEXT_ID);
+        GrantContext ctx = serverServices.getProvidedServices().getGrantContextProvider().findById(grantContextId).get();
+        return ctx;
     }
 
     private void postProcessLoginDialogResult(Exchange exchange) throws Exception {
@@ -92,8 +104,6 @@ public class LoginEndpoint extends Endpoint {
             Map<String, String> params = URLParamUtil.parseQueryString(exchange.getRequest().getBody());
             this.serverServices.getProvidedServices().getUserDataProvider().verifyUser(params.get("username"),params.get("password"));
         }
-        if(consent != null && consent.equals("true"))
-            s.putValue(Constants.SESSION_CONSENT_GIVEN,"yes");
     }
 
     private Map<String, String> setTargetInParams(com.predic8.membrane.core.exchange.Exchange exc) throws Exception {
@@ -103,11 +113,11 @@ public class LoginEndpoint extends Endpoint {
 //            params.put("target",loginPath + "login");
             params.put("target",exc.getRequest().getUri());
         }else{
-            if(target.equals("/login/login"))
-                params.put("target",loginPath + "consent");
-            else if(target.equals("/login/consent")){
-                params.put("target","/auth2");
-            }
+            if(target.startsWith("/login/login"))
+                params.put("target",loginPath + "consent?" + URLParamUtil.encode(ImmutableMap.<String,String>builder()
+                        .put(Constants.GRANT_CONTEXT_ID, URLParamUtil.parseQueryString(target.substring(target.indexOf("?")+1)).get(Constants.GRANT_CONTEXT_ID))
+                        .put("target","")
+                        .build()));
         }
         return params;
     }
@@ -168,10 +178,5 @@ public class LoginEndpoint extends Endpoint {
             }
         }
         return builder.toString().trim();
-    }
-
-    @Override
-    public String getScope(Exchange exchange) throws Exception {
-        return null;
     }
 }

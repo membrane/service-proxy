@@ -128,17 +128,17 @@ public class OAuth2AuthorizationServer2Interceptor extends AbstractInterceptorWi
                 getUserDataProvider(),
                 subClaimName,
                 getIssuer(),
-                getClaimList().getSupportedClaims(),
-                this.getBasePath()), new IdTokenProvider(), serverServices -> {
+                getClaimList(),
+                this.getBasePath(), serverServices -> {
             try {
                 if(loginViewDisabled)
-                    return Arrays.asList();
+                    return null;
 
-                return Arrays.asList(new LoginEndpoint(router, serverServices, getUserDataProvider(), getSessionManager(), getLocation(), loginPath, getConsentPageFile(),"/login/login", "/login/consent"));
+                return new LoginEndpoint(router, serverServices, getUserDataProvider(), getSessionManager(), getLocation(), loginPath, getConsentPageFile(),"/login/login", "/login/consent");
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
-        });
+        }), new IdTokenProvider());
 
         consentPageFile.init(router, getConsentFile());
     }
