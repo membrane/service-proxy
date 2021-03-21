@@ -25,6 +25,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import com.predic8.membrane.annot.bean.MCUtil;
+import com.predic8.membrane.core.interceptor.oauth2.authorizationservice.MembraneAuthorizationService;
 import com.predic8.membrane.core.jmx.JmxExporter;
 import com.predic8.membrane.core.jmx.JmxRouter;
 import org.slf4j.Logger;
@@ -119,6 +120,8 @@ public class Router implements Lifecycle, ApplicationContextAware, BeanNameAware
 	private boolean retryInit;
 	private Timer reinitializator;
 	private String id;
+
+    private final List<MembraneAuthorizationService> delayedServices = new LinkedList<>();
 
 	public Router() {
 		ruleManager.setRouter(this);
@@ -261,6 +264,14 @@ public class Router implements Lifecycle, ApplicationContextAware, BeanNameAware
 		transport.init(this);
 	}
 
+    /**
+     * Allows registration of authorization services to the router to be initialized after the ports are opened in case
+     * the OpenID Connect Provider is running in the same Membrane router.
+     * @param service the service to register for delayed activation.
+     */
+	public void registerForDelayedInitialization(MembraneAuthorizationService service) {
+	    delayedServices.add(service);
+    }
 	@Override
 	public void start() {
 		try {
@@ -274,6 +285,10 @@ public class Router implements Lifecycle, ApplicationContextAware, BeanNameAware
 			init();
 			initJmx();
 			getRuleManager().openPorts();
+
+            for(MembraneAuthorizationService service : delayedServices) {
+                service.init2();
+            }
 
 			try {
 				if (hotDeploy)
